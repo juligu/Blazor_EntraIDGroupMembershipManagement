@@ -1,0 +1,85 @@
+﻿@page "/Groups"
+
+@rendermode InteractiveServer
+
+@inject NavigationManager Navigation
+
+@using Azure.Identity
+@using Microsoft.Graph
+
+
+<Modal @ref="modal" Size="ModalSize.Large" UseStaticBackdrop="true" CloseOnEscape="false"
+    OnHidden="@((args) => StateHasChanged())" />
+
+<Grid TItem="GroupInfo"
+      Class="table table-hover table-bordered table-striped"
+      DataProvider="GroupsDataProvider"
+      AllowFiltering="true"
+      AllowPaging="true"
+      PageSize="5"
+      AllowSorting="true"
+      AllowSelection="true"
+      Responsive="true">
+    <GridColumns>
+        <GridColumn TItem="GroupInfo" HeaderText="Display Name" PropertyName="DisplayName" SortKeySelector="item => item.DisplayName">
+            @context.DisplayName
+        </GridColumn>
+        <GridColumn TItem="GroupInfo" HeaderText="Description" PropertyName="Description" SortKeySelector="item => item.Description">
+            @context.Description
+        </GridColumn>
+        <GridColumn TItem="GroupInfo" Filterable="false" Sortable="false">
+            <Button Color="ButtonColor.Primary" Outline="true" @onclick="((args) => ShowUsersComponent(context.Id, context.DisplayName))"> Manage Users </Button>
+        </GridColumn>
+    </GridColumns>
+</Grid>
+
+@code {
+    public List<GroupInfo> Groups { get; set; } = default!;
+    [Inject]
+    public IGraphClient graphClient { get; set; }
+    [Inject]
+    public IConfiguration configuration { get; set; }
+
+
+    public string ClientId { get; set; }
+
+    private Modal modal = default!;
+
+    private async Task ShowUsersComponent(string groupID, string groupName)
+    {
+        var parameters = new Dictionary<string, object>();
+        parameters.Add("GroupID", groupID);
+        parameters.Add("GroupName", groupName);
+        parameters.Add("OnClickCallback", EventCallback.Factory.Create<MouseEventArgs>(this, CompleteModal));
+        await modal.ShowAsync<AddUsers>(title: "Add User", parameters: parameters);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (String.IsNullOrEmpty(ClientId))
+        {
+            ClientId = configuration["EntraID:ClientId"];
+        }
+
+        await base.OnInitializedAsync();
+    }
+
+    private async Task CompleteModal(MouseEventArgs e) {
+        await modal.HideAsync();
+        StateHasChanged();
+    }
+
+    private async Task<GridDataProviderResult<GroupInfo>> GroupsDataProvider(GridDataProviderRequest<GroupInfo> request)
+    {
+        if (Groups is null) // pull employees only one time for client-side filtering, sorting, and paging
+            Groups = await GetGraphAPIGroups(); // call a service or an API to pull the employees
+
+        return await Task.FromResult(request.ApplyTo(Groups));
+    }
+
+    public async Task<List<GroupInfo>> GetGraphAPIGroups()
+    {
+        var result = await graphClient.GetGroupsAsync(true, "OBJECTID");
+        return result.ToList();
+    }
+}

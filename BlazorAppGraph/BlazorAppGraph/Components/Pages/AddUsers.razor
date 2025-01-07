@@ -1,0 +1,135 @@
+﻿@using Microsoft.Graph
+@using Microsoft.Graph.Models
+@inject NavigationManager Navigation
+
+<h3>Add Users</h3>
+<h5>@GroupName</h5>
+
+<Grid TItem="UserInfo"
+      Class="table table-hover table-bordered table-striped"
+      DataProvider="UsersDataProvider"
+      AllowFiltering="true"
+      AllowPaging="true"
+      PageSize="5"
+      AllowSorting="true"
+      AllowSelection="false"
+      SelectedItemsChanged="OnSelectedItemsChanged"
+      Responsive="true"
+      @ref="Grid">
+    <GridColumns>
+        <GridColumn TItem="UserInfo" HeaderText="" PropertyName="Id" SortKeySelector="item => item.Id">
+            <input type="checkbox" checked="@context.IsSelected" @oninput="((args) => SelectedItem(args, context))" />
+        </GridColumn>
+        <GridColumn TItem="UserInfo" HeaderText="Display Name" PropertyName="DisplayName" SortKeySelector="item => item.DisplayName">
+            @context.DisplayName
+        </GridColumn>
+        <GridColumn TItem="UserInfo" HeaderText="Mail" PropertyName="Mail" SortKeySelector="item => item.Mail">
+            @context.Mail
+        </GridColumn>
+    </GridColumns>
+</Grid>
+
+<Button Color="ButtonColor.Primary" @onclick="UpdateData"> Save Changes </Button>
+
+@code {
+    [Parameter]
+    public string GroupID { get; set; } = "";
+    [Parameter]
+    public string GroupName { get; set; } = "";
+    [Parameter] 
+    public EventCallback<MouseEventArgs> OnClickCallback { get; set; }
+
+    [Inject]
+    public IGraphClient graphClient { get; set; }
+
+    public List<UserInfo> Users { get; set; } = default!;
+    public GroupInfo Group { get; set; } = default!;
+    public HashSet<UserInfo> selectedUsers = new();
+    public Grid<UserInfo> Grid { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Users = null;
+        Group = null;
+
+        await base.OnInitializedAsync();
+        return;
+    }
+
+    private async Task<GridDataProviderResult<UserInfo>> UsersDataProvider(GridDataProviderRequest<UserInfo> request)
+    {
+
+        if (Users is null)
+        {
+            var results = await ListUsers(); // call a service or an API to pull the employees
+            if (Group is null)
+                Group = await GetGroupMembers();
+
+            foreach (var user in results)
+            {
+                if (Group.Members.Any(m => m.Id == user.Id))
+                {
+                    user.IsSelected = true;
+                    selectedUsers.Add(user);
+                }
+            }
+           Users = results;
+        }
+
+        var result = request.ApplyTo(Users);
+        return await Task.FromResult(result);
+    }
+
+    public async Task<GroupInfo> GetGroupMembers()
+    {
+        var result = await graphClient.GetGroupAsync(GroupID, true);
+        return result;
+    }
+
+    public async Task<List<UserInfo>> ListUsers()
+    {
+        var result = await graphClient.GetUsers();
+        return result.ToList();
+    }
+
+    private Task OnSelectedItemsChanged(HashSet<UserInfo> users)
+    {
+        selectedUsers = users is not null && users.Any() ? users : new();
+        return Task.CompletedTask;
+    }
+
+    private async Task UpdateData(MouseEventArgs e)
+    {
+        foreach (var user in selectedUsers)
+        {
+            if (!Group.Members.Any(m => m.Id == user.Id))
+                await graphClient.AddUserToGroupAsync(user.Id, GroupID);
+        }
+
+        foreach (var user in Group.Members.Where(p => !selectedUsers.Any(c => c.Id == p.Id)))
+        {
+            await graphClient.RemoveUserFromGroupAsync(user.Id, GroupID);
+        }
+
+        Users = null;
+        Group = null;
+        selectedUsers.Clear();
+
+        await Grid.RefreshDataAsync();
+        await OnClickCallback.InvokeAsync(e);
+    }
+
+    private async Task SelectedItem(ChangeEventArgs e, UserInfo user)
+    {
+        if (Convert.ToBoolean(e.Value))
+        {
+            if (!selectedUsers.Contains(user))
+                selectedUsers.Add(user);
+        }
+        else
+        {
+            if (selectedUsers.Contains(user))
+                selectedUsers.Remove(user);
+        }
+    }
+}
